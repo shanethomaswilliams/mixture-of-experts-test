@@ -1,0 +1,107 @@
+# Ignore data files
+*.csv
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+*.npy
+*.npz
+*.mat
+*.feather
+*.parquet
+*.db
+*.sqlite
+*.sqlite3
+
+# Ignore model and checkpoint files
+*.pth
+*.pth.tar
+*.pt
+*.ckpt
+*.pb
+*.h5
+*.keras
+*.weights
+*.model
+*.tar
+*.tar.gz
+
+# Ignore JSON and YAML files (often config or data)
+*.json
+*.yaml
+*.yml
+
+# Ignore image files
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.svg
+*.ico
+
+# Ignore audio/video files
+*.mp3
+*.wav
+*.mp4
+*.avi
+*.mov
+
+# Ignore compressed files
+*.zip
+*.gz
+*.tar
+*.tgz
+*.rar
+*.7z
+
+# Ignore logs
+*.log
+*.out
+*.err
+
+# Ignore Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.py[cod]
+*$py.class
+
+#ignore all cifar data
+
+data/cifar-10-batches-py/*
+
+# Ignore Jupyter notebook checkpoints
+.ipynb_checkpoints/
+
+# Ignore virtual environments
+venv/
+env/
+.venv/
+.env
+
+# Ignore IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Ignore build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Ignore test coverage
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
+# Optionally keep some specific JSON files if needed
+# !config.json
+# !package.json
