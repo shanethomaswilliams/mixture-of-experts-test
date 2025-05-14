@@ -49,7 +49,6 @@ def train_model(model, device, tr_loader, va_loader, loss_module, batch_size=1,
     else:
         print(f"Detected standard model: {model_name}. Using standard training.")
     
-    # Make sure tr_loader shuffling reproducible
     torch.manual_seed(data_order_seed)      
     torch.cuda.manual_seed(data_order_seed)
     model.to(device)
@@ -58,42 +57,34 @@ def train_model(model, device, tr_loader, va_loader, loss_module, batch_size=1,
         filter(lambda p: p.requires_grad, model.parameters()),
         lr=lr)
 
-    # Allocate lists for tracking progress each epoch
     tr_info = {'xent':[], 'err':[], 'loss':[]}
     va_info = {'xent':[], 'err':[]}
     epochs = []
     
-    # For tracking expert usage
     expert_usage_history = []
 
-    # Init vars needed for early stopping
     best_va_loss = float('inf')
-    curr_wait = 0 # track epochs we are waiting to early stop
+    curr_wait = 0 
 
-    # Count size of datasets, for adjusting metric values to be per-example
     n_train = float(len(tr_loader.dataset))
     n_batch_tr = float(len(tr_loader))
     n_valid = float(len(va_loader.dataset))
 
-    # Progress bar
     progressbar = tqdm(range(n_epochs + 1))
     pbar_info = {}
 
-    # Curriculum learning for switch weight
-    initial_switch_weight = switch_balance_weight  # Use provided weight as initial
-    final_switch_weight = switch_balance_weight * 2.0  # Double it by the end
+    initial_switch_weight = switch_balance_weight 
+    final_switch_weight = switch_balance_weight * 2.0 
     switch_weight_schedule = np.linspace(initial_switch_weight, final_switch_weight, n_epochs)
 
-    # Loop over epochs
     for epoch in progressbar:
         if epoch > 0:
-            model.train() # In TRAIN mode
-            tr_loss = 0.0  # aggregate total loss
-            tr_xent = 0.0  # aggregate pure cross-entropy (without L2)
-            tr_err = 0     # count mistakes on train set
+            model.train() 
+            tr_loss = 0.0 
+            tr_xent = 0.0  
+            tr_err = 0  
             pbar_info['batch_done'] = 0
             
-            # Get current switch weight from schedule
             current_switch_weight = switch_weight_schedule[epoch-1] if epoch <= n_epochs else final_switch_weight
             
             for bb, (x, y) in enumerate(tr_loader):
@@ -103,16 +94,13 @@ def train_model(model, device, tr_loader, va_loader, loss_module, batch_size=1,
 
                 logits_BC = model(x_BF)
                 
-                # Calculate pure cross-entropy for tracking
                 pure_xent = loss_module.calc_xent_loss(logits_BC, y_B, reduction='mean')
                 
-                # Calculate cross-entropy with L2 for optimization
                 xent_loss_with_l2 = loss_module.calc_xent_loss_with_l2(logits_BC, y_B, model, l2pen_mag, batch_size, reduction='mean')
                 
                 loss = xent_loss_with_l2
                 
                 if is_moe_model:
-                    # Apply all load balancing losses
                     switch_lb_loss = loss_module.calc_switch_load_balancing_loss(model)
                     loss += current_switch_weight * switch_lb_loss
 
@@ -126,7 +114,6 @@ def train_model(model, device, tr_loader, va_loader, loss_module, batch_size=1,
                     mi_loss = loss_module.calc_mutual_information_loss(model, y_B)
                     loss += mutual_info_weight * mi_loss
                     
-                    # Track expert usage
                     if hasattr(model, 'last_gate_logits'):
                         _, expert_indices = torch.max(model.last_gate_logits, dim=1)
                         expert_counts = torch.bincount(expert_indices, minlength=model.num_experts)
@@ -138,35 +125,30 @@ def train_model(model, device, tr_loader, va_loader, loss_module, batch_size=1,
                 pbar_info['batch_done'] += 1        
                 progressbar.set_postfix(pbar_info)
     
-                # Increment loss metrics we track for debugging/diagnostics
                 tr_loss += loss.item() / n_batch_tr
-                tr_xent += pure_xent.item() / n_batch_tr  # Track pure cross-entropy only
+                tr_xent += pure_xent.item() / n_batch_tr
                 tr_err += metrics.zero_one_loss(
                     logits_BC.argmax(axis=1).detach().cpu().numpy(),
                     y_B.detach().cpu().numpy(), normalize=False)
                     
             tr_err_rate = tr_err / n_train
             
-            # Print expert usage stats at end of epoch
             if is_moe_model and expert_usage_history:
                 epoch_usage = np.mean(expert_usage_history, axis=0)
                 print(f"Epoch {epoch} expert usage: {epoch_usage}")
                 expert_usage_history = []  # Reset for next epoch
                 
         else:
-            # First epoch (0) doesn't train, just measures initial perf on val
             tr_loss = np.nan
             tr_xent = np.nan
             tr_err_rate = np.nan
 
-        # Track performance on val set
         with torch.no_grad():
-            model.eval() # In EVAL mode
+            model.eval()
             va_xent = 0.0
             va_err = 0
             for xva_BF, yva_B in va_loader:
                 logits_BC = model(xva_BF.to(device))
-                # For validation, we only track pure cross-entropy (no L2)
                 va_xent += loss_module.calc_xent_loss(logits_BC, yva_B.to(device), reduction='sum').item()
                 va_err += metrics.zero_one_loss(
                     logits_BC.argmax(axis=1).detach().cpu().numpy(),
@@ -174,7 +156,6 @@ def train_model(model, device, tr_loader, va_loader, loss_module, batch_size=1,
             va_xent = va_xent / n_valid
             va_err_rate = va_err / n_valid
 
-        # Update diagnostics and progress bar
         epochs.append(epoch)
         tr_info['loss'].append(tr_loss)
         tr_info['xent'].append(tr_xent)
@@ -187,8 +168,6 @@ def train_model(model, device, tr_loader, va_loader, loss_module, batch_size=1,
             })
         progressbar.set_postfix(pbar_info)
 
-        # Early stopping logic
-        # If loss is dropping, track latest weights as best
         if va_xent < best_va_loss:
             best_epoch = epoch
             best_va_loss = va_xent
@@ -239,12 +218,10 @@ def evaluate_model(model, dataloader, device):
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
             
-            # Collect outputs, labels, and predictions
             all_outputs.append(outputs.cpu())
             all_labels.append(labels.cpu())
             all_predictions.append(predicted.cpu())
     
-    # Concatenate all batches
     all_outputs = torch.cat(all_outputs, dim=0)
     all_labels = torch.cat(all_labels, dim=0)
     all_predictions = torch.cat(all_predictions, dim=0)
@@ -270,7 +247,7 @@ def compute_l2_regularization(model, weight_decay=0.0001):
     l2_reg = torch.tensor(0., device=next(model.parameters()).device)
     
     for name, param in model.named_parameters():
-        if 'bias' not in name:  # Usually we don't regularize bias terms
+        if 'bias' not in name:
             l2_reg += torch.norm(param, p=2)
     
     return weight_decay * l2_reg
@@ -279,22 +256,16 @@ def train_step_with_moe(model, images, labels, optimizer, lambda_balance=0.01, w
     """Training step for traditional MoE with cross entropy, L2 regularization, and load balancing"""
     optimizer.zero_grad()
     
-    # Forward pass
     outputs = model(images)
     
-    # Classification loss (Cross Entropy)
     ce_loss = F.cross_entropy(outputs, labels)
     
-    # L2 Regularization
     l2_loss = compute_l2_regularization(model, weight_decay)
     
-    # Load balancing loss
     balance_loss = model.get_load_balancing_loss()
     
-    # Total loss = Cross Entropy + L2 Regularization + Load Balancing
     total_loss = ce_loss + l2_loss + lambda_balance * balance_loss
     
-    # Backward pass
     total_loss.backward()
     optimizer.step()
     
@@ -304,19 +275,14 @@ def train_step_with_moe_builtin_l2(model, images, labels, optimizer, lambda_bala
     """Training step using optimizer's weight_decay for L2 regularization"""
     optimizer.zero_grad()
     
-    # Forward pass
     outputs = model(images)
     
-    # Classification loss (Cross Entropy)
     ce_loss = F.cross_entropy(outputs, labels)
     
-    # Load balancing loss
     balance_loss = model.get_load_balancing_loss()
     
-    # Total loss (L2 is handled by optimizer's weight_decay)
     total_loss = ce_loss + lambda_balance * balance_loss
     
-    # Backward pass
     total_loss.backward()
     optimizer.step()
     
@@ -326,17 +292,15 @@ def calculate_dataset_stats(data_path, batch_size=1000):
     """Calculate mean and std of CIFAR-10 dataset"""
     print("Calculating dataset statistics...")
     
-    # Load CIFAR-10 without normalization
     transform = transforms.Compose([transforms.ToTensor()])
     
     train_dataset = datasets.CIFAR10(
         root=data_path, 
         train=True, 
         transform=transform, 
-        download=False  # Already downloaded
+        download=False  
     )
     
-    # Create data loader
     train_loader = torch.utils.data.DataLoader(
         train_dataset, 
         batch_size=batch_size, 
@@ -344,14 +308,12 @@ def calculate_dataset_stats(data_path, batch_size=1000):
         num_workers=2
     )
     
-    # Calculate mean
     mean = torch.zeros(3)
     for images, _ in tqdm(train_loader, desc="Computing mean"):
-        for i in range(3):  # RGB channels
+        for i in range(3): 
             mean[i] += images[:, i, :, :].mean()
     mean /= len(train_loader)
     
-    # Calculate std
     std = torch.zeros(3)
     for images, _ in tqdm(train_loader, desc="Computing std"):
         for i in range(3):
@@ -371,24 +333,19 @@ def download_cifar10(data_path, compute_stats=True):
     Returns:
         dict: Contains success status and normalization statistics if computed
     """
-    # Create the data directory if it doesn't exist
     os.makedirs(data_path, exist_ok=True)
     
-    # Path for statistics file
     stats_file = os.path.join(data_path, 'cifar10_stats.json')
     
     try:
-        # Download both training and test datasets
         print(f"Downloading CIFAR-10 to {data_path}...")
         
-        # Download training data
         train_dataset = datasets.CIFAR10(
             root=data_path, 
             train=True, 
             download=True
         )
         
-        # Download test data
         test_dataset = datasets.CIFAR10(
             root=data_path, 
             train=False, 
@@ -399,7 +356,6 @@ def download_cifar10(data_path, compute_stats=True):
         print(f"Training samples: {len(train_dataset)}")
         print(f"Test samples: {len(test_dataset)}")
         
-        # Compute statistics if requested
         if compute_stats:
             if os.path.exists(stats_file):
                 print(f"Loading existing statistics from {stats_file}")
@@ -411,7 +367,6 @@ def download_cifar10(data_path, compute_stats=True):
                 print("Computing normalization statistics...")
                 mean, std = calculate_dataset_stats(data_path)
                 
-                # Save statistics
                 stats = {
                     'mean': mean,
                     'std': std,
@@ -457,11 +412,9 @@ def load_cifar10_with_stats(data_path, batch_size=128, num_workers=2, val_ratio=
     import os
     import json
     
-    # Check if data already exists
     cifar_dir = os.path.join(data_path, 'cifar-10-batches-py')
     stats_file = os.path.join(data_path, 'cifar10_stats.json')
     
-    # Load or compute stats
     if os.path.exists(stats_file):
         print(f"Loading existing statistics from {stats_file}")
         with open(stats_file, 'r') as f:
@@ -470,14 +423,12 @@ def load_cifar10_with_stats(data_path, batch_size=128, num_workers=2, val_ratio=
         std = stats['std']
     else:
         print("Computing normalization statistics...")
-        # Only download/compute if needed
         result = download_cifar10(data_path, compute_stats=True)
         if not result['success']:
             raise RuntimeError(f"Failed to download CIFAR-10: {result.get('error', 'Unknown error')}")
         mean = result['mean']
         std = result['std']
     
-    # Create transforms
     transform_train = transforms.Compose([
         transforms.RandomCrop(32, padding=4),
         transforms.RandomHorizontalFlip(),
@@ -490,45 +441,40 @@ def load_cifar10_with_stats(data_path, batch_size=128, num_workers=2, val_ratio=
         transforms.Normalize(mean, std),
     ])
     
-    # Load datasets - download=True will only download if data doesn't exist
     train_dataset = datasets.CIFAR10(
         root=data_path, 
         train=True, 
         transform=transform_train,
-        download=True  # Only downloads if needed
+        download=True 
     )
     
     val_dataset = datasets.CIFAR10(
         root=data_path, 
         train=True, 
         transform=transform_test,
-        download=False  # Already checked above
+        download=False
     )
     
     test_dataset = datasets.CIFAR10(
         root=data_path, 
         train=False, 
         transform=transform_test,
-        download=True  # Only downloads if needed
+        download=True 
     )
     
-    # Create train/val split
     total_size = len(train_dataset)
     indices = list(range(total_size))
     val_size = int(total_size * val_ratio)
     
-    # Shuffle indices for random split
     np.random.seed(random_seed)
     np.random.shuffle(indices)
     
     train_indices = indices[val_size:]
     val_indices = indices[:val_size]
     
-    # Create subsets
     train_subset = torch.utils.data.Subset(train_dataset, train_indices)
     val_subset = torch.utils.data.Subset(val_dataset, val_indices)
     
-    # Create data loaders
     train_loader = torch.utils.data.DataLoader(
         train_subset, 
         batch_size=batch_size, 
@@ -553,7 +499,6 @@ def load_cifar10_with_stats(data_path, batch_size=128, num_workers=2, val_ratio=
         pin_memory=torch.cuda.is_available()
     )
     
-    # Prepare stats
     stats = {
         'mean': mean,
         'std': std,
@@ -597,10 +542,8 @@ def plot_confusion_matrix(cm, class_names, title, filename=None, figsize=(10, 8)
     """Plot a confusion matrix with labels"""
     plt.figure(figsize=figsize)
     
-    # Normalize confusion matrix to percentages
     cm_normalized = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis] * 100
     
-    # Create heatmap
     sns.heatmap(cm_normalized, annot=True, fmt='.1f', cmap='Blues',
                 xticklabels=class_names, yticklabels=class_names)
     
@@ -626,7 +569,6 @@ def get_model_predictions(model, dataloader, device):
         for images, labels in dataloader:
             images, labels = images.to(device), labels.to(device)
             
-            # Get predictions from model
             logits = model(images)
             preds = logits.argmax(dim=1)
             
@@ -651,31 +593,25 @@ def create_confusion_matrix_standard(model, dataloader, device, output_dir, clas
         true_labels: Ground truth labels
         accuracy: Model accuracy
     """
-    # Ensure output directory exists
     os.makedirs(output_dir, exist_ok=True)
     
-    # Get predictions
     predictions, true_labels = get_model_predictions(model, dataloader, device)
     
-    # Create confusion matrix
     cm = confusion_matrix(true_labels, predictions)
     accuracy = np.sum(np.diag(cm)) / np.sum(cm) * 100
     
-    # Plot confusion matrix
     title = f'Model Confusion Matrix (Accuracy: {accuracy:.2f}%)'
     filename = os.path.join(output_dir, 'confusion_matrix.png')
     
     plot_confusion_matrix(cm, class_names, title, filename)
     print(f"Model accuracy: {accuracy:.2f}%")
     
-    # Save results to JSON
     results = {
         "accuracy": round(accuracy, 2),
         "confusion_matrix": cm.tolist(),
         "class_accuracies": {}
     }
     
-    # Calculate per-class accuracy
     for i, class_name in enumerate(class_names):
         class_mask = (true_labels == i)
         if np.sum(class_mask) > 0:
@@ -684,7 +620,6 @@ def create_confusion_matrix_standard(model, dataloader, device, output_dir, clas
             class_accuracy = class_correct / class_total * 100
             results["class_accuracies"][class_name] = round(class_accuracy, 2)
     
-    # Save results
     results_file = os.path.join(output_dir, 'results.json')
     with open(results_file, 'w') as f:
         json.dump(results, f, indent=2)
@@ -707,42 +642,34 @@ def plot_training_history(info, plots_dir):
     import matplotlib.pyplot as plt
     import os
     
-    # Extract data, handling potential None values
     train_losses = info['tr']['xent']
     val_losses = info['va']['xent']
     
-    # Remove any None values from the beginning of train losses
     start_idx = 0
     while start_idx < len(train_losses) and train_losses[start_idx] is None:
         start_idx += 1
     
     train_losses = train_losses[start_idx:]
     
-    # Check if validation losses need the same treatment
     val_start_idx = 0
     while val_start_idx < len(val_losses) and val_losses[val_start_idx] is None:
         val_start_idx += 1
     
     val_losses = val_losses[val_start_idx:]
     
-    # Take the minimum length to ensure matching dimensions
     min_length = min(len(train_losses), len(val_losses))
     train_losses = train_losses[:min_length]
     val_losses = val_losses[:min_length]
     
-    # Create epochs based on the final length
     epochs = range(1, min_length + 1)
     
-    # Plot training and validation loss
     plt.figure(figsize=(10, 6))
     plt.plot(epochs, train_losses, label='Training Loss', color='blue', linewidth=2)
     plt.plot(epochs, val_losses, label='Validation Loss', color='red', linewidth=2)
     
-    # Mark the best epoch
     best_epoch = info['best_epoch']
     best_val_loss = info['best_va_loss']
     
-    # Adjust best_epoch if we skipped initial values
     adjusted_best_epoch = best_epoch - start_idx
     if adjusted_best_epoch > 0 and adjusted_best_epoch <= min_length:
         plt.scatter([adjusted_best_epoch], [best_val_loss], color='green', s=100, marker='*', 
@@ -762,7 +689,7 @@ def plot_training_history(info, plots_dir):
     
     return loss_plot_path
 
-## 
+
 
 def get_expert_predictions_corrected(model, dataloader, device):
     """
@@ -775,7 +702,6 @@ def get_expert_predictions_corrected(model, dataloader, device):
     full_model_preds = []
     true_labels = []
     
-    # Debug: Count predictions per class for each expert
     expert_class_counts = [{} for _ in range(num_experts)]
     
     with torch.no_grad():
@@ -783,42 +709,32 @@ def get_expert_predictions_corrected(model, dataloader, device):
             images, labels = images.to(device), labels.to(device)
             batch_size = images.size(0)
             
-            # Get predictions from each expert WITH skip connection
             for i in range(num_experts):
-                # Get expert features
                 _, expert_features = model.experts[i](images)
                 
-                # Get skip features if skip connection is used
                 if model.use_skip:
                     skip_features = model.skip_path(images)
                     combined_features = torch.cat([expert_features, skip_features], dim=1)
                     
-                    # Use the actual final classifier
                     expert_logits = model.final_fc(combined_features)
                 else:
-                    # If no skip connection, use expert's own logits
                     expert_logits, _ = model.experts[i](images)
                 
                 expert_pred = expert_logits.argmax(dim=1)
                 expert_preds[i].extend(expert_pred.cpu().numpy())
                 
-                # Debug: Count predictions per class
                 for pred in expert_pred.cpu().numpy():
                     expert_class_counts[i][pred] = expert_class_counts[i].get(pred, 0) + 1
             
-            # Get predictions from full model
             full_logits = model(images)
             full_pred = full_logits.argmax(dim=1)
             full_model_preds.extend(full_pred.cpu().numpy())
             
-            # Store true labels
             true_labels.extend(labels.cpu().numpy())
             
-            # Debug print every 10 batches
             if batch_idx % 10 == 0:
                 print(f"Processed batch {batch_idx}/{len(dataloader)}")
     
-    # Debug: Print prediction distribution for each expert
     for i in range(num_experts):
         print(f"\nExpert {i+1} prediction distribution:")
         for class_id, count in sorted(expert_class_counts[i].items()):
@@ -830,7 +746,6 @@ def create_expert_analysis(expert_preds, true_labels, class_names, output_dir):
     """Create comprehensive expert analysis and visualizations"""
     num_experts = len(expert_preds)
     
-    # Convert expert predictions to numpy arrays if they aren't already
     expert_preds_arrays = []
     for i in range(num_experts):
         if isinstance(expert_preds[i], list):
@@ -838,17 +753,14 @@ def create_expert_analysis(expert_preds, true_labels, class_names, output_dir):
         else:
             expert_preds_arrays.append(expert_preds[i])
     
-    # Convert true_labels to numpy array if it isn't already
     if isinstance(true_labels, list):
         true_labels = np.array(true_labels)
     
-    # Debug: Check shapes
     print(f"True labels shape: {true_labels.shape}")
     for i, expert_pred in enumerate(expert_preds_arrays):
         print(f"Expert {i+1} predictions shape: {expert_pred.shape}")
         assert true_labels.shape[0] == expert_pred.shape[0], f"Mismatch in number of predictions for expert {i+1}!"
     
-    # Create confusion matrix for each expert
     for i in range(num_experts):
         cm = confusion_matrix(true_labels, expert_preds_arrays[i])
         accuracy = np.sum(np.diag(cm)) / np.sum(cm) * 100
@@ -859,7 +771,6 @@ def create_expert_analysis(expert_preds, true_labels, class_names, output_dir):
         plot_confusion_matrix(cm, class_names, title, filename)
         print(f"    Expert {i+1} accuracy: {accuracy:.2f}%")
     
-    # Calculate per-class accuracy for each expert
     expert_accuracies = np.zeros((num_experts, len(class_names)))
     
     for i in range(num_experts):
@@ -872,12 +783,10 @@ def create_expert_analysis(expert_preds, true_labels, class_names, output_dir):
                 total = np.sum(class_mask)
                 expert_accuracies[i, j] = correct / total * 100
                 
-                # Debug print
                 print(f"Expert {i+1}, Class {class_name}: {correct}/{total} = {expert_accuracies[i, j]:.2f}%")
             else:
                 print(f"Warning: No true labels for class {class_name}")
     
-    # Create heatmap of expert specializations
     plt.figure(figsize=(12, 8))
     sns.heatmap(expert_accuracies, annot=True, fmt='.1f', cmap='YlOrRd',
                 xticklabels=class_names, 
@@ -896,7 +805,6 @@ def create_combined_expert_visualization(expert_preds, true_labels, class_names,
     """Create a combined visualization showing what each expert specializes in"""
     num_experts = len(expert_preds)
     
-    # Convert to numpy arrays
     expert_preds_arrays = []
     for i in range(num_experts):
         if isinstance(expert_preds[i], list):
@@ -904,19 +812,16 @@ def create_combined_expert_visualization(expert_preds, true_labels, class_names,
         else:
             expert_preds_arrays.append(expert_preds[i])
     
-    # Debug: Verify we have predictions
     for i, expert_pred in enumerate(expert_preds_arrays):
         print(f"Expert {i+1} has {len(expert_pred)} predictions")
         if len(expert_pred) == 0:
             print(f"Warning: Expert {i+1} has no predictions!")
     
-    # Calculate per-class accuracy for each expert
     expert_accuracies = np.zeros((num_experts, len(class_names)))
     
     for i in range(num_experts):
         expert_preds_array = expert_preds_arrays[i]
         
-        # Check if expert makes any predictions
         if len(expert_preds_array) == 0:
             print(f"Warning: Expert {i+1} has no predictions!")
             continue
@@ -928,14 +833,12 @@ def create_combined_expert_visualization(expert_preds, true_labels, class_names,
                 total = np.sum(class_mask)
                 expert_accuracies[i, j] = correct / total * 100
                 
-                # Check if expert never predicts this class
                 expert_predicts_class = np.sum(expert_preds_array == j)
                 if expert_predicts_class == 0:
                     print(f"Warning: Expert {i+1} never predicts class {class_name}")
                 else:
                     print(f"Expert {i+1} predicts class {class_name} {expert_predicts_class} times")
     
-    # Create heatmap of expert specializations
     plt.figure(figsize=(12, 8))
     sns.heatmap(expert_accuracies, annot=True, fmt='.1f', cmap='YlOrRd',
                 xticklabels=class_names, 
@@ -952,7 +855,6 @@ def create_combined_expert_visualization(expert_preds, true_labels, class_names,
     
     print(f"Expert specialization heatmap saved to {filename}")
 
-    # Create comprehensive expert analysis JSON
     expert_analysis = {
         "expert_accuracies": {
             "description": "Per-class accuracy for each expert",
@@ -976,7 +878,6 @@ def create_combined_expert_visualization(expert_preds, true_labels, class_names,
         }
     }
 
-    # Fill in expert accuracies
     for i in range(num_experts):
         expert_name = f"expert_{i+1}"
         expert_analysis["expert_accuracies"]["data"][expert_name] = {}
@@ -985,11 +886,9 @@ def create_combined_expert_visualization(expert_preds, true_labels, class_names,
             accuracy = expert_accuracies[i, j]
             expert_analysis["expert_accuracies"]["data"][expert_name][class_name] = round(accuracy, 2)
         
-        # Overall accuracy for this expert
         overall_accuracy = np.mean(expert_accuracies[i, :])
         expert_analysis["overall_expert_accuracy"]["data"][expert_name] = round(overall_accuracy, 2)
 
-    # Determine best expert per class
     best_expert_per_class = np.argmax(expert_accuracies, axis=0)
     for j, class_name in enumerate(class_names):
         best_expert_idx = best_expert_per_class[j]
@@ -999,10 +898,9 @@ def create_combined_expert_visualization(expert_preds, true_labels, class_names,
             "accuracy": round(best_accuracy, 2)
         }
 
-    # Expert rankings for each class
     for j, class_name in enumerate(class_names):
         class_accuracies = expert_accuracies[:, j]
-        ranking_indices = np.argsort(-class_accuracies)  # Sort descending
+        ranking_indices = np.argsort(-class_accuracies)
         rankings = []
         for idx in ranking_indices:
             rankings.append({
@@ -1011,12 +909,10 @@ def create_combined_expert_visualization(expert_preds, true_labels, class_names,
             })
         expert_analysis["expert_rankings_by_class"]["data"][class_name] = rankings
 
-    # Class rankings for each expert
     for i in range(num_experts):
         expert_name = f"expert_{i+1}"
         expert_accuracies_list = expert_accuracies[i, :]
         
-        # Get indices sorted by accuracy
         sorted_indices = np.argsort(-expert_accuracies_list)
         
         rankings = []
@@ -1027,43 +923,35 @@ def create_combined_expert_visualization(expert_preds, true_labels, class_names,
             })
         expert_analysis["class_rankings_by_expert"]["data"][expert_name] = rankings
 
-    # Save expert analysis to JSON
     json_filename = os.path.join(output_dir, 'expert_analysis.json')
     with open(json_filename, 'w') as f:
         json.dump(expert_analysis, f, indent=2)
 
     print(f"Expert analysis saved to {json_filename}")
 
-    # Create raw_data directory
     raw_data_dir = os.path.join(output_dir, 'raw_data')
     os.makedirs(raw_data_dir, exist_ok=True)
     
-    # Save raw accuracy matrix to raw_data directory
     np.save(os.path.join(raw_data_dir, 'expert_accuracies.npy'), expert_accuracies)
 
 def create_expert_confusion_matrices(model, data_loader, device, plots_dir, class_names):
     """
     Create confusion matrices and comprehensive analysis for each expert in the model.
     """
-    # Ensure plots directory exists
     os.makedirs(plots_dir, exist_ok=True)
     
-    # Get predictions from each expert using the correct architecture
     expert_preds, full_model_preds, true_labels = get_expert_predictions_corrected(
         model, data_loader, device
     )
     
-    # Debug: Print summary information
     print(f"\nSummary:")
     print(f"Number of experts: {len(expert_preds)}")
     print(f"Number of samples: {len(true_labels)}")
     print(f"Classes: {class_names}")
     print(f"Unique true labels: {np.unique(true_labels)}")
     
-    # Create confusion matrix for each expert and analysis
     create_expert_analysis(expert_preds, true_labels, class_names, plots_dir)
     
-    # Create confusion matrix for the full model
     cm_full = confusion_matrix(true_labels, full_model_preds)
     accuracy_full = np.sum(np.diag(cm_full)) / np.sum(cm_full) * 100
     
@@ -1073,10 +961,8 @@ def create_expert_confusion_matrices(model, data_loader, device, plots_dir, clas
     plot_confusion_matrix(cm_full, class_names, title_full, filename_full)
     print(f"Full model accuracy: {accuracy_full:.2f}%")
     
-    # Create combined visualization showing expert specializations
     create_combined_expert_visualization(expert_preds, true_labels, class_names, plots_dir)
     
-    # Create analysis_result.json
     analysis_result = {
         "full_model_accuracy": round(accuracy_full, 2),
         "expert_accuracies": {},
@@ -1085,7 +971,6 @@ def create_expert_confusion_matrices(model, data_loader, device, plots_dir, clas
         }
     }
     
-    # Add individual expert accuracies and confusion matrices
     for i, expert_pred in enumerate(expert_preds):
         expert_pred_array = np.array(expert_pred)
         cm = confusion_matrix(true_labels, expert_pred_array)
@@ -1094,7 +979,6 @@ def create_expert_confusion_matrices(model, data_loader, device, plots_dir, clas
         analysis_result["expert_accuracies"][f"expert_{i+1}"] = round(accuracy, 2)
         analysis_result["confusion_matrices"][f"expert_{i+1}"] = cm.tolist()
     
-    # Save analysis results
     with open(os.path.join(plots_dir, 'analysis_result.json'), 'w') as f:
         json.dump(analysis_result, f, indent=2)
     

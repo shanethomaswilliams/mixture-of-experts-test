@@ -30,16 +30,12 @@ def calc_switch_load_balancing_loss(model, epsilon=1e-8):
     batch_size = gate_logits.size(0)
     num_experts = gate_logits.size(1)
     
-    # Find which expert is chosen for each sample
     _, expert_indices = torch.max(gate_logits, dim=1)
     
-    # Count how many samples each expert is chosen for
     expert_counts = torch.bincount(expert_indices, minlength=num_experts).float()
     
-    # Ideal: each expert handles batch_size/num_experts samples
     ideal_count = batch_size / num_experts
     
-    # Calculate load balancing loss
     loss = ((expert_counts - ideal_count) ** 2).sum() / batch_size
     
     return loss
@@ -52,18 +48,14 @@ def calc_importance_loss_with_entropy(model, target_cv=0.1):
     gate_probs = model.last_gate_probs
     batch_size, num_experts = gate_probs.size()
     
-    # Calculate importance
     importance = gate_probs.mean(dim=0)
     
-    # Calculate coefficient of variation
     importance_mean = importance.mean()
     importance_std = importance.std()
     cv = importance_std / (importance_mean + 1e-8)
     
-    # Loss pushes CV towards target
     importance_loss = (cv - target_cv) ** 2
     
-    # Entropy penalty
     sample_entropy = -(gate_probs * torch.log(gate_probs + 1e-8)).sum(dim=1)
     max_entropy = torch.log(torch.tensor(num_experts, device=gate_probs.device))
     entropy_penalty = (sample_entropy / max_entropy).mean()
@@ -78,18 +70,14 @@ def calc_topk_load_balancing_loss(model, k=1):
     gate_probs = model.last_gate_probs
     batch_size, num_experts = gate_probs.size()
     
-    # Get top-k experts
     topk_probs, topk_indices = torch.topk(gate_probs, k, dim=1)
     
-    # Create mask for selected experts
     expert_mask = torch.zeros_like(gate_probs)
     expert_mask.scatter_(1, topk_indices, 1)
     
-    # Calculate usage
     expert_usage = expert_mask.sum(dim=0) / batch_size
     ideal_usage = k / num_experts
     
-    # L2 loss
     loss = ((expert_usage - ideal_usage) ** 2).mean()
     
     return loss
@@ -102,10 +90,8 @@ def calc_mutual_information_loss(model, labels, num_classes=10):
     gate_logits = model.last_gate_logits
     batch_size, num_experts = gate_logits.size()
     
-    # Get expert assignments
     _, expert_indices = torch.max(gate_logits, dim=1)
     
-    # Create joint probability matrix
     joint_prob = torch.zeros(num_experts, num_classes, device=gate_logits.device)
     
     for e in range(num_experts):
@@ -113,16 +99,13 @@ def calc_mutual_information_loss(model, labels, num_classes=10):
             mask = (expert_indices == e) & (labels == c)
             joint_prob[e, c] = mask.float().sum() / batch_size
     
-    # Calculate marginal probabilities
     p_expert = joint_prob.sum(dim=1, keepdim=True)
     p_class = joint_prob.sum(dim=0, keepdim=True)
     
-    # Calculate mutual information
     p_marginal_product = p_expert * p_class
     epsilon = 1e-10
     mi_terms = joint_prob * torch.log((joint_prob + epsilon) / (p_marginal_product + epsilon))
     mutual_info = mi_terms.sum()
     
-    # We want to maximize MI, so return negative
     return -mutual_info
     

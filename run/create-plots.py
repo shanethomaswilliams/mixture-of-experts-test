@@ -9,7 +9,6 @@ import json
 from pathlib import Path
 import sys
 
-# Add the parent directory to the path to find the src module
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
@@ -18,13 +17,11 @@ try:
     from src.models import AdaptiveMoEWithSkip
     from src.utils import load_cifar10_with_stats
 except ImportError:
-    # Try alternate import path
     sys.path.append(os.path.join(parent_dir, 'src'))
     try:
         from models import AdaptiveMoEWithSkip
         from utils import load_cifar10_with_stats
     except ImportError:
-        # If that fails, try importing directly
         try:
             from models import AdaptiveMoEWithSkip
             from utils import load_cifar10_with_stats
@@ -35,10 +32,6 @@ except ImportError:
             print(f"Parent directory: {parent_dir}")
             print(f"Python path: {sys.path}")
             sys.exit(1)
-
-# You'll need to import your model classes and helper functions
-# from your_model_file import AdaptiveMoEWithSkip
-# from your_data_utils import load_cifar10_with_stats
 
 def parse_experiment_name(exp_name):
     """Parse experiment directory name to extract parameters"""
@@ -68,31 +61,24 @@ def get_expert_predictions_corrected(model, dataloader, device):
             images, labels = images.to(device), labels.to(device)
             batch_size = images.size(0)
             
-            # Get predictions from each expert WITH skip connection
             for i in range(num_experts):
-                # Get expert features
                 _, expert_features = model.experts[i](images)
                 
-                # Get skip features if skip connection is used
                 if model.use_skip:
                     skip_features = model.skip_path(images)
                     combined_features = torch.cat([expert_features, skip_features], dim=1)
                     
-                    # Use the actual final classifier
                     expert_logits = model.final_fc(combined_features)
                 else:
-                    # If no skip connection, use expert's own logits
                     expert_logits, _ = model.experts[i](images)
                 
                 expert_pred = expert_logits.argmax(dim=1)
                 expert_preds[i].extend(expert_pred.cpu().numpy())
             
-            # Get predictions from full model
             full_logits = model(images)
             full_pred = full_logits.argmax(dim=1)
             full_model_preds.extend(full_pred.cpu().numpy())
             
-            # Store true labels
             true_labels.extend(labels.cpu().numpy())
     
     return expert_preds, np.array(full_model_preds), np.array(true_labels)
@@ -101,10 +87,8 @@ def plot_confusion_matrix(cm, class_names, title, filename=None, figsize=(10, 8)
     """Plot a confusion matrix with labels"""
     plt.figure(figsize=figsize)
     
-    # Normalize confusion matrix to percentages
     cm_normalized = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis] * 100
     
-    # Create heatmap
     sns.heatmap(cm_normalized, annot=True, fmt='.1f', cmap='Blues',
                 xticklabels=class_names, yticklabels=class_names)
     
@@ -121,7 +105,6 @@ def create_expert_analysis(expert_preds, true_labels, class_names, output_dir):
     """Create comprehensive expert analysis and visualizations"""
     num_experts = len(expert_preds)
     
-    # Create confusion matrix for each expert
     for i in range(num_experts):
         cm = confusion_matrix(true_labels, expert_preds[i])
         accuracy = np.sum(np.diag(cm)) / np.sum(cm) * 100
@@ -132,11 +115,9 @@ def create_expert_analysis(expert_preds, true_labels, class_names, output_dir):
         plot_confusion_matrix(cm, class_names, title, filename)
         print(f"    Expert {i+1} accuracy: {accuracy:.2f}%")
     
-    # Calculate per-class accuracy for each expert
     expert_accuracies = np.zeros((num_experts, len(class_names)))
     
     for i in range(num_experts):
-        # Convert expert predictions to numpy array
         expert_preds_array = np.array(expert_preds[i])
         
         for j, class_name in enumerate(class_names):
@@ -146,7 +127,6 @@ def create_expert_analysis(expert_preds, true_labels, class_names, output_dir):
                 total = np.sum(class_mask)
                 expert_accuracies[i, j] = correct / total * 100
     
-    # Create heatmap of expert specializations
     plt.figure(figsize=(12, 8))
     sns.heatmap(expert_accuracies, annot=True, fmt='.1f', cmap='YlOrRd',
                 xticklabels=class_names, 
@@ -165,7 +145,6 @@ def verify_model_architecture(model, state_dict):
     """Verify that the model architecture matches the saved state dict"""
     model_state = model.state_dict()
     
-    # Check if all keys match
     model_keys = set(model_state.keys())
     state_dict_keys = set(state_dict.keys())
     
@@ -180,7 +159,6 @@ def verify_model_architecture(model, state_dict):
         print(f"  WARNING: Unexpected keys in model: {unexpected_keys}")
         return False
     
-    # Check if shapes match
     shape_mismatches = []
     for key in model_state.keys():
         if key in state_dict:
@@ -203,22 +181,18 @@ def verify_model_architecture(model, state_dict):
 def process_all_experiments(experiments_dir, data_path, device):
     """Process all experiments in the experiments directory"""
     
-    # CIFAR-10 class names
     class_names = ['airplane', 'automobile', 'bird', 'cat', 'deer', 
                    'dog', 'frog', 'horse', 'ship', 'truck']
     
-    # Load dataloaders once
     print("Loading CIFAR-10 dataset...")
     train_loader, val_loader, test_loader, stats = load_cifar10_with_stats(data_path)
     
-    # Process each experiment directory
     for exp_dir in os.listdir(experiments_dir):
         exp_path = os.path.join(experiments_dir, exp_dir)
         
         if not os.path.isdir(exp_path):
             continue
             
-        # Parse experiment parameters
         params = parse_experiment_name(exp_dir)
         if not params:
             print(f"Skipping {exp_dir} - invalid experiment name format")
@@ -227,26 +201,21 @@ def process_all_experiments(experiments_dir, data_path, device):
         print(f"\nProcessing experiment: {exp_dir}")
         print(f"  Parameters: {params}")
         
-        # Create paths
         models_dir = os.path.join(exp_path, 'models')
         plots_dir = os.path.join(exp_path, 'plots')
         
-        # Find the most recent model file
         model_files = [f for f in os.listdir(models_dir) if f.endswith('.pth')]
         if not model_files:
             print(f"  No model files found in {models_dir}")
             continue
             
-        # Sort by modification time and get the most recent
         model_files.sort(key=lambda x: os.path.getmtime(os.path.join(models_dir, x)))
         model_file = model_files[-1]
         model_path = os.path.join(models_dir, model_file)
         
         print(f"  Loading model from {model_file}")
         
-        # Load model
         try:
-            # Create model with correct parameters
             model = AdaptiveMoEWithSkip(
                 num_experts=params['num_experts'],
                 num_classes=10,
@@ -254,10 +223,8 @@ def process_all_experiments(experiments_dir, data_path, device):
                 top_k=params['top_k']
             )
             
-            # Load state dict
             state_dict = torch.load(model_path, map_location=device)
             
-            # Verify architecture matches
             if not verify_model_architecture(model, state_dict):
                 print(f"  ERROR: Architecture mismatch for {exp_dir}")
                 continue
@@ -265,7 +232,6 @@ def process_all_experiments(experiments_dir, data_path, device):
             model.load_state_dict(state_dict)
             model = model.to(device)
             
-            # Print model info for verification
             print(f"  Model info:")
             print(f"    Number of experts: {model.num_experts}")
             print(f"    Top-k: {model.top_k}")
@@ -276,15 +242,12 @@ def process_all_experiments(experiments_dir, data_path, device):
             
             print("  Generating predictions and visualizations...")
             
-            # Get predictions using the corrected method
             expert_preds, full_model_preds, true_labels = get_expert_predictions_corrected(
                 model, test_loader, device
             )
             
-            # Create visualizations
             create_expert_analysis(expert_preds, true_labels, class_names, plots_dir)
             
-            # Create confusion matrix for full model
             cm_full = confusion_matrix(true_labels, full_model_preds)
             accuracy_full = np.sum(np.diag(cm_full)) / np.sum(cm_full) * 100
             
@@ -294,7 +257,6 @@ def process_all_experiments(experiments_dir, data_path, device):
             plot_confusion_matrix(cm_full, class_names, title_full, filename_full)
             print(f"  Full model accuracy: {accuracy_full:.2f}%")
             
-            # Save additional analysis in JSON format
             analysis_results = {
                 'experiment_params': params,
                 'model_architecture': {
@@ -316,7 +278,6 @@ def process_all_experiments(experiments_dir, data_path, device):
                 }
             }
             
-            # Save analysis results
             json_path = os.path.join(plots_dir, 'analysis_results.json')
             with open(json_path, 'w') as f:
                 json.dump(analysis_results, f, indent=2)
@@ -330,14 +291,12 @@ def process_all_experiments(experiments_dir, data_path, device):
             continue
 
 def main():
-    # Configuration
     experiments_dir = "../experiments"
-    data_path = "../data"  # Path to CIFAR-10 data
+    data_path = "../data" 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")\
     
     print(f"Using device: {device}")
     
-    # Process all experiments
     process_all_experiments(experiments_dir, data_path, device)
     
     print("\nAll experiments processed successfully!")

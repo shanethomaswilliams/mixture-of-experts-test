@@ -2,8 +2,8 @@
 #SBATCH -p ccgpu
 #SBATCH --gres=gpu
 #SBATCH --job-name=MoE_Test
-#SBATCH --output=/cluster/tufts/hugheslab/swilli26/MOE_TESTS/experiments/logs/moe_%j.out
-#SBATCH --error=/cluster/tufts/hugheslab/swilli26/MOE_TESTS/experiments/logs/moe_%j.err
+#SBATCH --output=/PATH/TO/ROOT/DIRECTORY/experiments/logs/moe_%j.out
+#SBATCH --error=/PATH/TO/ROOT/DIRECTORY/experiments/logs/moe_%j.err
 #SBATCH --time=10:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -13,15 +13,15 @@ module load cuda/11.0
 source activate Echo_MIL
 
 JOB_ID=${SLURM_JOB_ID}
-LOG_DIR="/cluster/tufts/hugheslab/swilli26/MOE_TESTS/experiments/logs"
+LOG_DIR="/PATH/TO/ROOT/DIRECTORY/experiments/logs"
 OUTPUT_FILE="${LOG_DIR}/moe_${JOB_ID}.out"
 ERROR_FILE="${LOG_DIR}/moe_${JOB_ID}.err"
 
 # Pass along all ENV variables as arguments to my Python script
-export PYTHONPATH="${PYTHONPATH}:/cluster/tufts/hugheslab/swilli26/MOE_TESTS"
-python /cluster/tufts/hugheslab/swilli26/MOE_TESTS/run/train_models.py \
+export PYTHONPATH="${PYTHONPATH}:/PATH/TO/ROOT/DIRECTORY"
+python /PATH/TO/ROOT/DIRECTORY/run/train_models.py \
     --dataset_name ${dataset_name:-"cifar10"} \
-    --data_dir ${data_dir:-"/cluster/tufts/hugheslab/swilli26/MOE_TESTS/data"} \
+    --data_dir ${data_dir:-"/PATH/TO/ROOT/DIRECTORY/data"} \
     --batch_size ${batch_size:-128} \
     --num_classes ${num_classes:-10} \
     --val_ratio ${val_ratio:-0.1} \
@@ -39,7 +39,7 @@ python /cluster/tufts/hugheslab/swilli26/MOE_TESTS/run/train_models.py \
     --do_early_stopping ${use_skip:-True} \
     --patience ${patience:-15} \
     --run_label ${run_label:-"num-experts_4_topk_1_lr_0.01"} \
-    --output_dir ${output_dir:-"/cluster/tufts/hugheslab/swilli26/MOE_TESTS/experiments/$run_label"} \
+    --output_dir ${output_dir:-"/PATH/TO/ROOT/DIRECTORY/experiments/$run_label"} \
     --model_filename ${model_filename:-"model.pth"} \
     --preds_filename ${preds_filename:-"preds.pt"} \
     --fig_filename ${fig_filename:-"plot.png"} \

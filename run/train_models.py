@@ -313,7 +313,6 @@ print("====================SAVING TRAINING SUMMARY=======================")
 final_loss = info["best_va_loss"]
 print(f"FINAL VALIDATION LOSS: {final_loss:.4f}")
 
-# Create a comprehensive summary
 print("====================SAVING TRAINING SUMMARY=======================")
 # STORE FINAL RESULTS
 final_loss = info["best_va_loss"]
@@ -370,7 +369,6 @@ summary = {
     "timestamp": info.get("timestamp", None)
 }
 
-# Add MoE loss weights to the final summary if using multiple experts
 if args.num_experts > 1:
     summary["moe_loss_weights"] = {
         "switch_balance_weight": args.switch_balance_weight,

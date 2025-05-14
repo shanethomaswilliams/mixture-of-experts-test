@@ -14,34 +14,39 @@ fi
 
 # DATASET PARAMETERS
 export dataset_name="cifar10"
-export data_dir="/cluster/tufts/hugheslab/swilli26/MOE_TESTS/data"
+export data_dir="PATH/TO/DATA"
 export batch_size=512
 export num_classes=10
 export val_ratio=0.1
 
-# Training configuration
+# TRAINING CONFIG
 export use_skip="True"
 export l2pen_mag=0.1
 export n_epochs=500
 export do_early_stopping="True"
 export patience=20
 
-# Create base directories once
-mkdir -p /cluster/tufts/hugheslab/swilli26/MOE_TESTS/experiments/logs
+mkdir -p PATH/TO/LOGS/STORE
 
-# Define all experiment configurations
-learning_rates=("0.01")
+learning_rates=("0.1 0.01 0.001")
 expert_configs=(
     "4:2"
+    "4:3"
+    "4:4"
+    "6:2"
+    "6:3"
+    "6:4"
+    "8:2"
+    "8:3"
+    "8:4"
     "1:1"
 )
 
-# Define single good values for all weights
-export switch_balance_weight=0.5    # Moderate value for load balancing
-export importance_weight=0.1        # Small but meaningful for expert specialization
-export topk_balance_weight=0.3      # Moderate for top-k routing
-export mutual_info_weight=0.2       # Encourages class specialization
-export entropy_weight=0.02          # Small entropy penalty
+export switch_balance_weight=0.5    # load balancing
+export importance_weight=0.1        # expert specialization
+export topk_balance_weight=0.3      # top-k routing
+export mutual_info_weight=0.2       # class specialization
+export entropy_weight=0.02          # entropy penalty
 
 # Calculate total experiments
 total_experiments=${#expert_configs[@]}
@@ -58,7 +63,7 @@ for lr in "${learning_rates[@]}"; do
         if [ "$num_experts" != "1" ]; then
             # MoE configuration with fixed weights
             export run_label="num-experts_${num_experts}_topk_${top_k}_lr_${learning_rate}"
-            export output_dir="/cluster/tufts/hugheslab/swilli26/MOE_TESTS/experiments/${run_label}"
+            export output_dir="/PATH/TO/ROOT/DIRECTORY/experiments/${run_label}"
         else
             # ResNet18 configuration - zero weights
             export switch_balance_weight=0.0
@@ -67,7 +72,7 @@ for lr in "${learning_rates[@]}"; do
             export mutual_info_weight=0.0
             export entropy_weight=0.0
             export run_label="ResNet18_lr_${learning_rate}"
-            export output_dir="/cluster/tufts/hugheslab/swilli26/MOE_TESTS/experiments/${run_label}"
+            export output_dir="/PATH/TO/ROOT/DIRECTORY/experiments/${run_label}"
         fi
         
         # These need to be full paths for the summary JSON
