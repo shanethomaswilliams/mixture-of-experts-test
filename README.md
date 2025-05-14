@@ -28,6 +28,9 @@ To train models, use the `run/train_models.py` script. However, we recommend usi
 
 You can control all the hyperparameters for training in the `run/launch_experiment.sh` file. Additionally, you need to explicitly specify whether to run the experiment locally (`run_here`) or submit it to a cluster (`submit`). This will fully train many mixture of experts and then create predictions and plots associated with training and testing.
 
+**NOTE:**
+Do not forget to replace `paths` in `run/launch_experiment.sh` and `run/run_training.slurm` with the proper paths to your data and root directory, additionally remember to download the CIFAR-10 dataset to run these experiments.
+
 For example:
 
 ```bash
